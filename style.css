@@ -1,0 +1,36 @@
+/* Style for the folder container */
+.world-info-folder {
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 5px;
+    margin-bottom: 5px;
+    padding: 5px;
+}
+
+/* Style for the clickable folder title */
+.world-info-folder summary {
+    cursor: pointer;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    gap: 8px; /* Space between icon and text */
+}
+
+/* Hover effect so it feels interactive */
+.world-info-folder summary:hover {
+    background-color: var(--black30a);
+    border-radius: 5px;
+}
+
+#WIEntryHeaderTitlesPC small[data-i18n="Strategy"],
+.world_entry select[name="selectiveLogic"] {
+    width: 75px !important;
+    min-width: 75px !important;
+    max-width: 75px !important;
+    padding-left: 2px !important;
+    padding-right: 2px !important;
+    box-sizing: border-box !important;
+}
+
+#WIEntryHeaderTitlesPC small[data-i18n="Strategy"] {
+    transform: translateX(-5px); /* Adjust this number if you want it moved more or less! */
+}

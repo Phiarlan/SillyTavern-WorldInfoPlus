@@ -1,0 +1,10 @@
+{
+    "display_name": "SillyTavern-WorldInfoPlus",
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "Siberys (@Phiarlan)",
+    "version": "1.0.0",
+    "description": "Enhances SillyTavern world info features with lorebook folders, UID editing, and more."
+}
