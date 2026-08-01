@@ -48,7 +48,11 @@ Some lorebooks, rather than acting as setting bibles, are instead prompt sets ta
 
 But now you don't have to worry! You just have to click one button and your lorebook(s) will be synced to your chosen Connection Profile! Lorebooks must be **activated**, not open in the editor for them to be synced to Connection Profiles. If you have no lorebooks activated on a Connection Profile when you click the sync button, it will remove any lorebooks already connected to a Connection Profile.
 ### Improved Chat Lore Support
-The Chat Lore feature (distinct from Character Lore) typically only allows **one** lorebook to be attached (whereas both Character Lore and global World Info allow multiple lorebooks). Now you can attach **multiple** lorebooks to one particular chat. Clicking the Chat Lore button will bring up a new menu that allows you to check the boxes for multiple lorebooks. Once you save your selections, they will appear in the new "Active World(s) for **this** chat" field in the global World Info panel.
+The Chat Lore feature (distinct from Character Lore) typically only allows **one** lorebook to be attached (whereas both Character Lore and global World Info allow multiple lorebooks). Now you can attach **multiple** lorebooks to one particular chat. Clicking the Chat Lore button will bring up a new menu that allows you to check the boxes for multiple lorebooks.
+
+![Chat Lore Button](assets/worldinfoplus-chatlorebutton.jpg)
+
+Once you save your selections, they will appear in the new "Active World(s) for **this** chat" field in the global World Info panel.
 ## License
 This project is licensed under the **GNU Affero General Public License v3.0**.
 See [LICENSE](LICENSE) for details.
