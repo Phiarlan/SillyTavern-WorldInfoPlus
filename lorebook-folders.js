@@ -38,6 +38,102 @@ export function debouncedRenderFolders() {
     folderRenderDebounce = setTimeout(() => renderFolders(), 50);
 }
 
+/**
+ * Adds a toolbar button that moves the currently edited lorebook into a folder,
+ * so users don't have to scroll the Tag Folders list hunting for it.
+ */
+export function injectMoveToFolderButton() {
+    if (document.getElementById('move-to-folder-btn')) return;
+
+    const openAllBtn = document.getElementById('OpenAllWIEntries');
+    if (!openAllBtn || !openAllBtn.parentNode) return;
+
+    const moveBtn = document.createElement('div');
+    moveBtn.id = 'move-to-folder-btn';
+    moveBtn.className = 'menu_button interactable fa-solid fa-arrow-right-to-bracket';
+    moveBtn.title = 'Move this lorebook into a folder';
+
+    moveBtn.addEventListener('click', async () => {
+        const worldSelect = /** @type {HTMLSelectElement} */ (document.getElementById('world_editor_select'));
+        if (!worldSelect || !worldSelect.value) {
+            // @ts-ignore
+            return toastr.warning('No lorebook selected!');
+        }
+
+        const bookName = worldSelect.options[worldSelect.selectedIndex].text;
+
+        const folderNames = Object.keys(settings.folders).sort((a, b) =>
+            a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true })
+        );
+
+        // Find the book's current folder (if any)
+        /** @type {string} */
+        let currentFolder = 'Uncategorized';
+        for (const f in settings.folders) {
+            if (settings.folders[f].includes(bookName)) { currentFolder = f; break; }
+        }
+
+        // @ts-ignore
+        window.tempFolderMoveTarget = currentFolder;
+
+        let html = `<div style="max-height: 400px; overflow-y: auto; text-align: left; padding: 10px;">`;
+        html += `<div style="margin-bottom: 15px; font-size: 0.9em; opacity: 0.8;">Move <b>${bookName}</b> to which folder?</div>`;
+
+        html += `<select onchange="window.tempFolderMoveTarget = this.value" class="text_pole" style="width: 100%; padding: 6px;">`;
+        ['Uncategorized', ...folderNames].forEach(/** @param {string} folder */ folder => {
+            const selected = folder === currentFolder ? ' selected' : '';
+            const safeFolder = folder.replace(/"/g, '"');
+            html += `<option value="${safeFolder}"${selected}>${folder}</option>`;
+        });
+        html += `</select></div>`;
+
+        const { Popup } = SillyTavern.getContext();
+        if (!Popup) return alert('Popup module not found.');
+
+        // @ts-ignore
+        const confirmed = await Popup.show.confirm('Move to Folder', html, { okButton: 'Move', cancelButton: 'Cancel' });
+
+        if (confirmed) {
+            // @ts-ignore
+            const target = window.tempFolderMoveTarget;
+            if (!target) return;
+
+            // Remove from all folders first
+            for (const f in settings.folders) {
+                settings.folders[f] = settings.folders[f].filter(/** @param {string} b */ b => b !== bookName);
+            }
+
+            if (target !== 'Uncategorized') {
+                if (!settings.folders[target]) settings.folders[target] = [];
+                settings.folders[target].push(bookName);
+            }
+
+            saveSettingsDebounced();
+            debouncedRenderFolders();
+
+            // @ts-ignore
+            toastr.success(`Moved "${bookName}" to "${target}".`, 'Folder Updated');
+        }
+    });
+
+    // Anchor after the Link Profile button, else after Re-index, else fallback
+    const linkBtn = document.getElementById('link-profile-btn');
+    const reindexBtn = document.getElementById('reindex-uids-btn');
+
+    if (linkBtn && linkBtn.parentNode) {
+        linkBtn.parentNode.insertBefore(moveBtn, linkBtn.nextSibling);
+    } else if (reindexBtn && reindexBtn.parentNode) {
+        reindexBtn.parentNode.insertBefore(moveBtn, reindexBtn.nextSibling);
+    } else {
+        const applyOrderBtn = openAllBtn.parentNode.querySelector('.fa-sort-numeric-down, [title*="Order" i], [title*="sorting" i]');
+        if (applyOrderBtn && applyOrderBtn.parentNode) {
+            applyOrderBtn.parentNode.insertBefore(moveBtn, applyOrderBtn.nextSibling);
+        } else {
+            openAllBtn.parentNode.appendChild(moveBtn);
+        }
+    }
+}
+
 // ==========================================
 // FOLDER RENDERER
 // ==========================================

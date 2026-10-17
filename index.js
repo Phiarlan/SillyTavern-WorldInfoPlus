@@ -5,7 +5,7 @@ forceApplyChatLoreButtonStateSoon, syncNativeChatLoreMetadata, normalizeWorldInf
 
 import { injectUIDTools, setupInlineUIDObserver } from './uid-editor.js';
 
-import { debouncedRenderFolders, syncFolderHighlighting, renderFolders } from './lorebook-folders.js';
+import { debouncedRenderFolders, syncFolderHighlighting, renderFolders, injectMoveToFolderButton } from './lorebook-folders.js';
 
 import { injectProfileLinkButton, updateProfileInfoDisplay } from './profile-lorebooks.js';
 
@@ -94,6 +94,7 @@ eventSource.on(event_types.APP_READY, () => {
 
     injectUIDTools();
     injectProfileLinkButton();
+    injectMoveToFolderButton();
     setupInlineUIDObserver();
 
     // Restricts the Connection Profile observer strictly to the API panel
