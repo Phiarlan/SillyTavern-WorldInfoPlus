@@ -44,15 +44,29 @@ eventSource.on(event_types.APP_READY, () => {
     createFolderBtn.className = "menu_button fa-solid fa-folder-plus";
     createFolderBtn.title = "Create new World Info Folder";
 
-    createFolderBtn.addEventListener("click", () => {
-        const newFolder = prompt("Enter name for new folder:");
-        if (!newFolder) return;
+    createFolderBtn.addEventListener("click", async () => {
+        const { Popup } = SillyTavern.getContext();
+
+        /** @type {string | null} */
+        let newFolder = null;
+
+        if (Popup) {
+            // @ts-ignore
+            newFolder = await Popup.show.input('Create Folder', 'Enter name for new folder:', '', { okButton: 'Create', cancelButton: 'Cancel' });
+        } else {
+            newFolder = prompt("Enter name for new folder:");
+        }
+
+        if (newFolder === null || newFolder.trim() === '') return;
+        newFolder = newFolder.trim();
 
         // Validates nested paths: "Parent/Child" requires "Parent" to exist
         if (newFolder.includes('/')) {
             const parentPath = newFolder.split('/').slice(0, -1).join('/');
             if (!settings.folders[parentPath]) {
-                return alert(`Parent folder "${parentPath}" doesn't exist yet! Create it first, or create "${newFolder.split('/').pop()}" and drag it in.`);
+                // @ts-ignore
+                toastr.warning(`Parent folder "${parentPath}" doesn't exist yet! Create it first, or create "${newFolder.split('/').pop()}" and drag it in.`);
+                return;
             }
         }
 
@@ -61,7 +75,8 @@ eventSource.on(event_types.APP_READY, () => {
             saveSettingsDebounced();
             renderFolders();
         } else {
-            alert("Folder already exists!");
+            // @ts-ignore
+            toastr.warning("Folder already exists!");
         }
     });
 

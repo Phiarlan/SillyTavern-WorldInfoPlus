@@ -34,3 +34,17 @@
 #WIEntryHeaderTitlesPC small[data-i18n="Strategy"] {
     transform: translateX(-5px); /* Adjust this number if you want it moved more or less! */
 }
+
+/* Restores disclosure triangles lost to display:flex on summaries */
+#world-info-folders-master > summary::before,
+.world-info-folder summary::before {
+    content: '▸';
+    display: inline-block;
+    margin-right: 6px;
+    transition: transform 0.15s ease;
+}
+
+#world-info-folders-master[open] > summary::before,
+.world-info-folder[open] > summary::before {
+    transform: rotate(90deg);
+}

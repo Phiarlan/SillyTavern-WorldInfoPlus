@@ -25,7 +25,9 @@ export function injectProfileLinkButton() {
     linkProfileBtn.addEventListener('click', () => {
         const profileSelect = /** @type {HTMLSelectElement} */ (document.getElementById('connection_profiles'));
         if (!profileSelect || !profileSelect.value) {
-            return alert('No Connection Profile selected! Please open the API Connections menu and select a profile first.');
+            // @ts-ignore
+            toastr.warning('No Connection Profile selected! Please open the API Connections menu and select a profile first.');
+            return;
         }
 
         const profileName = profileSelect.value;

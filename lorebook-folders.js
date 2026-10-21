@@ -1,11 +1,39 @@
 // lorebook-folders.js
 
+import { getLorebookData } from './uid-editor.js';
+
 const { extensionSettings, saveSettingsDebounced } = SillyTavern.getContext();
 const MODULE_NAME = 'world-info-plus';
 
 /** @type {any} */
 const settingsMap = extensionSettings;
 const settings = settingsMap[MODULE_NAME];
+
+// Bulk Selection Mode
+let isSelectionMode = false;
+/** @type {Set<string>} */
+const selectedBooks = new Set();
+
+/**
+ * Refreshes the bulk action bar's count and button disabled states.
+ * Called on every checkbox change without a full re-render.
+ */
+function updateBulkBar() {
+    const bar = document.getElementById('wip-bulk-bar');
+    if (!bar) return;
+
+    const count = /** @type {HTMLElement} */ (bar.querySelector('.wip-bulk-count'));
+    if (count) count.textContent = `${selectedBooks.size} selected`;
+
+    // Live-updates "Move # to..." so the label never lies about the batch size
+    const ph = bar.querySelector('.wip-bulk-move-placeholder');
+    if (ph) ph.textContent = `Move ${selectedBooks.size} to...`;
+
+    bar.querySelectorAll('[data-bulk-action]').forEach(el => {
+        const ctl = /** @type {HTMLButtonElement | HTMLSelectElement} */ (el);
+        ctl.disabled = selectedBooks.size === 0;
+    });
+}
 
 // Cache for Auto-Rename Detection
 /** @type {Array<{value: string, text: string}>} */
@@ -160,7 +188,14 @@ export function renderFolders() {
         });
 
         const masterSummary = document.createElement('summary');
-        masterSummary.innerHTML = `<b><i class="fa-solid fa-folder-tree"></i> Tag Folders</b>`;
+        masterSummary.innerHTML = `
+            <b><i class="fa-solid fa-folder-tree"></i> Tag Folders</b>
+            <div class="bulk-select-btn" title="Bulk Select Books" style="opacity: 0.7; padding: 0 5px; margin-left: 8px; transition: color 0.2s;">
+                <i class="fa-solid fa-list-check"></i>
+            </div>
+        `;
+        masterSummary.style.display = 'flex';
+        masterSummary.style.alignItems = 'center';
         masterSummary.style.cursor = 'pointer';
         masterSummary.style.padding = '8px';
         masterSummary.style.backgroundColor = 'var(--black30a)';
@@ -186,6 +221,25 @@ export function renderFolders() {
         }
 
         worldSelect.style.display = 'none';
+    }
+
+    // BULK SELECTION: toolbar toggle
+    const bulkBtn = /** @type {HTMLElement | null} */ (masterDetails.querySelector('.bulk-select-btn'));
+    if (bulkBtn && !bulkBtn.hasAttribute('data-bulk-wired')) {
+        bulkBtn.setAttribute('data-bulk-wired', 'true');
+
+        bulkBtn.addEventListener('click', (/** @type {MouseEvent} */ e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            isSelectionMode = !isSelectionMode;
+            if (!isSelectionMode) selectedBooks.clear();
+            renderFolders();
+        });
+    }
+
+    if (bulkBtn) {
+        bulkBtn.style.opacity = isSelectionMode ? '1' : '0.7';
+        bulkBtn.style.color = isSelectionMode ? 'var(--SmartThemeQuoteColor, #4caf50)' : '';
     }
 
     customContainer.innerHTML = '';
@@ -261,6 +315,46 @@ export function renderFolders() {
             : '';
 
         summary.innerHTML = `<i class="fa-solid fa-folder"></i> <span class="folder-name">${displayName}</span> ${deleteBtnHtml}`;
+
+        // BULK SELECTION: folder header select-all (covers the subtree)
+        if (isSelectionMode) {
+            const folderCheck = document.createElement('input');
+            folderCheck.type = 'checkbox';
+            folderCheck.style.marginRight = '8px';
+            folderCheck.style.cursor = 'pointer';
+
+            // All books in this folder AND its subfolders
+            // (Uncategorized isn't a settings key - its books arrive via the books param)
+            const subtreeBooks = folderName === 'Uncategorized'
+                ? books.map(/** @param {{value: string, text: string}} b */ b => b.text)
+                : Object.keys(settings.folders)
+                    .filter(key => key === folderName || key.startsWith(folderName + '/'))
+                    .flatMap(key => settings.folders[key] || []);
+
+            if (subtreeBooks.length > 0) {
+                folderCheck.checked = subtreeBooks.every(b => selectedBooks.has(b));
+                // Dash state when some-but-not-all of the subtree is selected
+                folderCheck.indeterminate = !folderCheck.checked && subtreeBooks.some(b => selectedBooks.has(b));
+                folderCheck.title = 'Select all lorebooks in this folder and its subfolders. The folders themselves are never moved or deleted.';
+                folderCheck.addEventListener('click', (/** @type {MouseEvent} */ e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+
+                    const allSelected = subtreeBooks.every(b => selectedBooks.has(b));
+
+                    if (allSelected) {
+                        subtreeBooks.forEach(/** @param {string} b */ b => selectedBooks.delete(b));
+                    } else {
+                        subtreeBooks.forEach(/** @param {string} b */ b => selectedBooks.add(b));
+                    }
+
+                    renderFolders();
+                });
+
+                summary.insertBefore(folderCheck, summary.firstChild);
+            }
+        }
+
         details.appendChild(summary);
 
         if (folderName !== "Uncategorized") {
@@ -311,7 +405,8 @@ export function renderFolders() {
 
                 // Prevents dropping a parent folder into its own descendant
                 if (folderName.startsWith(draggedFolder + '/')) {
-                    alert("Cannot drop a parent folder into its own subfolder.");
+                    // @ts-ignore
+                    toastr.warning("Cannot drop a parent folder into its own subfolder.");
                     return;
                 }
 
@@ -319,7 +414,8 @@ export function renderFolders() {
                 const newFolderPath = `${folderName}/${draggedBaseName}`;
 
                 if (settings.folders[newFolderPath]) {
-                    alert("A folder with that name already exists in this location!");
+                    // @ts-ignore
+                    toastr.warning("A folder with that name already exists in this location!");
                     return;
                 }
 
@@ -355,20 +451,33 @@ export function renderFolders() {
 
             const trashIcon = summary.querySelector('.fa-trash');
             if (trashIcon) {
-                trashIcon.addEventListener('click', (e) => {
+                trashIcon.addEventListener('click', async (e) => {
                     e.preventDefault();
-                    if (confirm(`Delete folder '${displayName}' and any subfolders? (Their lorebooks will be moved back to Uncategorized)`)) {
-                        // Deletes this folder AND cascades to its subfolders
-                        delete settings.folders[folderName];
-                        for (const key in settings.folders) {
-                            if (key.startsWith(folderName + '/')) {
-                                delete settings.folders[key];
-                                delete settings.folderState[key];
-                            }
-                        }
-                        saveSettingsDebounced();
-                        renderFolders();
+
+                    const { Popup } = SillyTavern.getContext();
+
+                    let confirmed = false;
+                    const message = `Delete folder <b>${displayName}</b> and any subfolders? (Their lorebooks will be moved back to Uncategorized)`;
+
+                    if (Popup) {
+                        // @ts-ignore
+                        confirmed = await Popup.show.confirm('Delete Folder', message, { okButton: 'Delete', cancelButton: 'Cancel' });
+                    } else {
+                        confirmed = confirm(message.replace(/<[^>]+>/g, ''));
                     }
+
+                    if (!confirmed) return;
+
+                    // Deletes this folder AND cascades to its subfolders
+                    delete settings.folders[folderName];
+                    for (const key in settings.folders) {
+                        if (key.startsWith(folderName + '/')) {
+                            delete settings.folders[key];
+                            delete settings.folderState[key];
+                        }
+                    }
+                    saveSettingsDebounced();
+                    renderFolders();
                 });
             }
         }
@@ -388,7 +497,6 @@ export function renderFolders() {
 
         books.forEach(/** @param {{value: string, text: string}} bookObj */ bookObj => {
             assignedLorebooks.add(bookObj.text);
-
             const item = document.createElement('div');
             item.className = 'folder-item';
             item.setAttribute('data-book-val', bookObj.value);
@@ -422,6 +530,23 @@ export function renderFolders() {
                     <i class="fa-solid fa-arrow-right-to-bracket"></i>
                 </div>
             `;
+
+            if (isSelectionMode) {
+                const checkLabel = document.createElement('label');
+                checkLabel.style.cssText = 'display:flex;align-items:center;margin-right:6px;cursor:pointer;';
+
+                const checkInput = document.createElement('input');
+                checkInput.type = 'checkbox';
+                checkInput.checked = selectedBooks.has(bookObj.text);
+                checkInput.addEventListener('change', () => {
+                    if (checkInput.checked) selectedBooks.add(bookObj.text);
+                    else selectedBooks.delete(bookObj.text);
+                    updateBulkBar();
+                });
+
+                checkLabel.appendChild(checkInput);
+                item.insertBefore(checkLabel, item.firstChild);
+            }
 
             const nameClick = item.querySelector('.book-name-click');
             if (nameClick) {
@@ -577,6 +702,210 @@ export function renderFolders() {
     uncategorizedBooks.sort((/** @type {{value: string, text: string}} */ a, /** @type {{value: string, text: string}} */ b) => a.text.localeCompare(b.text, undefined, { sensitivity: 'base', numeric: true }));
 
     customContainer.appendChild(createFolder("Uncategorized", uncategorizedBooks));
+
+    // BULK SELECTION: action bar (footer of the drawer, never an overlay)
+    const oldBar = document.getElementById('wip-bulk-bar');
+    if (oldBar) oldBar.remove();
+
+    if (isSelectionMode) {
+        const bar = document.createElement('div');
+        bar.id = 'wip-bulk-bar';
+        // No sticky, no z-index - sits BELOW the scroll box like a footer
+        bar.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 8px;margin-top:6px;background:var(--black30a, rgba(0,0,0,0.3));border:1px solid var(--SmartThemeBorderColor, #555);border-radius:5px;';
+
+        const count = document.createElement('span');
+        count.className = 'wip-bulk-count';
+        count.style.marginRight = '4px';
+        count.style.whiteSpace = 'nowrap';
+        bar.appendChild(count);
+
+        const allBtn = document.createElement('button');
+        allBtn.className = 'menu_button';
+        allBtn.style.whiteSpace = 'nowrap';
+
+        // Label reflects what the click will actually do (bar is rebuilt every render)
+        const allSelected = availableBooks.length > 0
+            && availableBooks.every(/** @param {{value: string, text: string}} b */ b => selectedBooks.has(b.text));
+        allBtn.textContent = allSelected ? 'Deselect All' : 'Select All';
+
+        allBtn.addEventListener('click', () => {
+            const isAllSelected = availableBooks.length > 0
+                && availableBooks.every(/** @param {{value: string, text: string}} b */ b => selectedBooks.has(b.text));
+
+            if (isAllSelected) {
+                selectedBooks.clear();
+            } else {
+                availableBooks.forEach(/** @param {{value: string, text: string}} b */ b => selectedBooks.add(b.text));
+            }
+            renderFolders();
+        });
+        bar.appendChild(allBtn);
+
+        const moveSelect = document.createElement('select');
+        moveSelect.className = 'text_pole';
+        moveSelect.setAttribute('data-bulk-action', 'true');
+        moveSelect.style.color = 'var(--SmartThemeBodyColor, #ccc)';
+        moveSelect.style.backgroundColor = 'var(--SmartThemeBlurTintColor, rgba(255,255,255,0.1))';
+        moveSelect.style.maxWidth = '140px';
+
+        const movePlaceholder = document.createElement('option');
+        movePlaceholder.value = '';
+        movePlaceholder.className = 'wip-bulk-move-placeholder';
+        movePlaceholder.selected = true;
+        movePlaceholder.innerText = `Move ${selectedBooks.size} to...`;
+        moveSelect.appendChild(movePlaceholder);
+
+        ['Uncategorized', ...Object.keys(settings.folders).sort((a, b) =>
+            a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true })
+        )].forEach(/** @param {string} opt */ opt => {
+            const option = document.createElement('option');
+            option.value = opt;
+            option.innerText = opt;
+            moveSelect.appendChild(option);
+        });
+
+        moveSelect.addEventListener('change', () => {
+            const target = moveSelect.value;
+            if (!target) return;
+
+            selectedBooks.forEach(/** @param {string} bookName */ bookName => {
+                for (const f in settings.folders) {
+                    settings.folders[f] = settings.folders[f].filter(/** @param {string} b */ b => b !== bookName);
+                }
+                if (target !== 'Uncategorized') {
+                    if (!settings.folders[target]) settings.folders[target] = [];
+                    settings.folders[target].push(bookName);
+                }
+            });
+
+            selectedBooks.clear();
+            saveSettingsDebounced();
+            renderFolders();
+        });
+        bar.appendChild(moveSelect);
+
+        const exportBtn = document.createElement('button');
+        exportBtn.className = 'menu_button';
+        exportBtn.setAttribute('data-bulk-action', 'true');
+        exportBtn.style.whiteSpace = 'nowrap';
+        exportBtn.innerHTML = '<i class="fa-solid fa-file-export"></i> Export';
+        exportBtn.addEventListener('click', async () => {
+            for (const name of selectedBooks) {
+                try {
+                    const data = await getLorebookData(name);
+                    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${name}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    URL.revokeObjectURL(url);
+                } catch (err) {
+                    console.error(`[WIP] Failed to export lorebook '${name}':`, err);
+                }
+                await new Promise(r => setTimeout(r, 150));
+            }
+        });
+        bar.appendChild(exportBtn);
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'menu_button';
+        deleteBtn.setAttribute('data-bulk-action', 'true');
+        deleteBtn.style.whiteSpace = 'nowrap';
+        deleteBtn.style.color = 'var(--red)';
+        deleteBtn.innerHTML = '<i class="fa-solid fa-trash"></i> Delete';
+        deleteBtn.addEventListener('click', async () => {
+            const names = [...selectedBooks];
+            const context = SillyTavern.getContext();
+
+            let confirmed = false;
+            const { Popup } = context;
+
+            if (Popup) {
+                // @ts-ignore
+                confirmed = await Popup.show.confirm('Bulk Delete', `Permanently delete <b>${names.length}</b> lorebook(s)? This cannot be undone!`, { okButton: 'Delete', cancelButton: 'Cancel' });
+            } else {
+                confirmed = confirm(`Permanently delete ${names.length} lorebook(s)? This cannot be undone!`);
+            }
+
+            if (!confirmed) return;
+
+            let deleted = 0;
+
+            for (const name of names) {
+                const globalSelectEl = /** @type {HTMLSelectElement | null} */ (document.getElementById('world_info'));
+                if (globalSelectEl) {
+                    const deadOpt = Array.from(globalSelectEl.options).find(/** @param {HTMLOptionElement} o */ o => String(o.text || '').trim() === name);
+                    if (deadOpt && String(deadOpt.value) !== '') {
+                        const deadVal = String(deadOpt.value);
+                        // @ts-ignore
+                        const globalSelect = $('#world_info');
+                        const rawVal = globalSelect.val();
+                        const arr = Array.isArray(rawVal) ? rawVal.map(String) : (rawVal ? [String(rawVal)] : []);
+                        // @ts-ignore
+                        globalSelect.val(arr.filter(/** @param {string} v */ v => v !== deadVal)).trigger('change');
+                    }
+                }
+
+                // Purge every extension reference: folders, chat lore, profile lore
+                for (const f in settings.folders) {
+                    settings.folders[f] = settings.folders[f].filter(/** @param {string} b */ b => b !== name);
+                }
+                if (settings.chatLorebooks) {
+                    Object.keys(settings.chatLorebooks).forEach(id => {
+                        settings.chatLorebooks[id] = settings.chatLorebooks[id].filter(/** @param {string} b */ b => b !== name);
+                    });
+                }
+                if (settings.profileLorebooks) {
+                    Object.keys(settings.profileLorebooks).forEach(p => {
+                        settings.profileLorebooks[p] = settings.profileLorebooks[p].filter(/** @param {string} b */ b => b !== name);
+                    });
+                }
+
+                try {
+                    const res = await fetch('/api/worldinfo/delete', {
+                        method: 'POST',
+                        headers: context.getRequestHeaders(),
+                        body: JSON.stringify({ name }),
+                    });
+                    if (res.ok) deleted++;
+                } catch (err) {
+                    console.error(`[WIP] Failed to delete lorebook '${name}':`, err);
+                }
+            }
+
+            selectedBooks.clear();
+            saveSettingsDebounced();
+
+            if (typeof context.updateWorldInfoList === 'function') {
+                await context.updateWorldInfoList();
+            }
+            // @ts-ignore
+            $('#world_editor_select').trigger('change');
+
+            renderFolders();
+
+            // @ts-ignore
+            toastr.success(`Deleted ${deleted} lorebook(s).`, 'Bulk Delete');
+        });
+        bar.appendChild(deleteBtn);
+
+        const doneBtn = document.createElement('button');
+        doneBtn.className = 'menu_button';
+        doneBtn.style.whiteSpace = 'nowrap';
+        doneBtn.textContent = 'Done';
+        doneBtn.addEventListener('click', () => {
+            isSelectionMode = false;
+            selectedBooks.clear();
+            renderFolders();
+        });
+        bar.appendChild(doneBtn);
+
+        masterDetails.appendChild(bar);
+        updateBulkBar();
+    }
 
     syncFolderHighlighting();
 }

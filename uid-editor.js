@@ -15,7 +15,7 @@ const settings = settingsMap[MODULE_NAME];
  * Fetches the raw Lorebook JSON from the SillyTavern backend
  * @param {string} bookName
  */
-async function getLorebookData(bookName) {
+export async function getLorebookData(bookName) {
     const res = await fetch('/api/worldinfo/get', {
         method: 'POST',
         headers: getRequestHeaders(),
@@ -62,9 +62,24 @@ export function injectUIDTools() {
 
     reindexBtn.addEventListener('click', async () => {
         const bookSelect = /** @type {HTMLSelectElement} */ (document.getElementById('world_editor_select'));
-        if (!bookSelect || !bookSelect.value) return alert('No lorebook selected!');
+        if (!bookSelect || !bookSelect.value) {
+            // @ts-ignore
+            return toastr.warning('No lorebook selected!');
+        }
 
-        if (!confirm('This will permanently renumber all UIDs from 0 to N based on their CURRENT VISUAL ORDER on your screen to fix export sorting. Proceed?')) return;
+        const { Popup } = SillyTavern.getContext();
+
+        let confirmed = false;
+        const message = 'This will <b>permanently renumber all UIDs</b> from 0 to N based on their CURRENT VISUAL ORDER on your screen to fix export sorting. Proceed?';
+
+        if (Popup) {
+            // @ts-ignore
+            confirmed = await Popup.show.confirm('Re-index UIDs', message, { okButton: 'Re-index', cancelButton: 'Cancel' });
+        } else {
+            confirmed = confirm(message.replace(/<[^>]+>/g, '')); // strips tags for the plain-text fallback
+        }
+
+        if (!confirmed) return;
 
         const bookName = bookSelect.options[bookSelect.selectedIndex].text;
 
@@ -94,11 +109,13 @@ export function injectUIDTools() {
             });
 
             if (visualUidOrder.length === 0) {
-                return alert('Could not detect any entries on the screen! Make sure the lorebook is open and entries are visible.');
+                // @ts-ignore
+                return toastr.warning('Could not detect any entries on the screen! Make sure the lorebook is open and entries are visible.');
             }
 
             if (visualUidOrder.length !== Object.keys(bookData.entries).length) {
-                return alert('Mismatch between visible entries and saved data. Please clear any search filters so all entries are visible, and try again.');
+                // @ts-ignore
+                return toastr.warning('Mismatch between visible entries and saved data. Please clear any search filters so all entries are visible, and try again.');
             }
 
             /** @type {Record<number, any>} */
@@ -118,7 +135,8 @@ export function injectUIDTools() {
 
         } catch (err) {
             console.error(err);
-            alert('Failed to re-index UIDs. Check console for details.');
+            // @ts-ignore
+            toastr.error('Failed to re-index UIDs. Check console for details.');
         }
     });
 
@@ -248,19 +266,50 @@ function injectInlineButton(entryDiv) {
         e.preventDefault();
 
         const bookSelect = /** @type {HTMLSelectElement} */ (document.getElementById('world_editor_select'));
-        if (!bookSelect || !bookSelect.value) return alert('No lorebook selected!');
+        if (!bookSelect || !bookSelect.value) {
+            // @ts-ignore
+            return toastr.warning('No lorebook selected!');
+        }
 
         const bookName = bookSelect.options[bookSelect.selectedIndex].text;
         const oldUid = String(uid);
 
-        const newUid = prompt(`Enter the NEW UID to replace ${oldUid}:`);
-        if (!newUid || isNaN(Number(newUid))) return;
+        const { Popup } = SillyTavern.getContext();
+
+        /** @type {string | null} */
+        let newUid = null;
+
+        if (Popup) {
+            // @ts-ignore
+            newUid = await Popup.show.input(
+                'Edit UID',
+                `Enter the NEW UID to replace <b>${oldUid}</b>:`,
+                '',
+                { okButton: 'Save', cancelButton: 'Cancel' }
+            );
+        } else {
+            newUid = prompt(`Enter the NEW UID to replace ${oldUid}:`);
+        }
+
+        if (newUid === null || newUid === '') return; // cancelled or left blank
+
+        if (isNaN(Number(newUid))) {
+            // @ts-ignore
+            toastr.warning('Please enter a valid numeric UID.');
+            return;
+        }
 
         try {
             const bookData = await getLorebookData(bookName);
 
-            if (!bookData.entries[oldUid]) return alert(`UID ${oldUid} not found in this lorebook.`);
-            if (bookData.entries[newUid]) return alert(`UID ${newUid} already exists! Choose an unused number.`);
+            if (!bookData.entries[oldUid]) {
+                // @ts-ignore
+                return toastr.error(`UID ${oldUid} not found in this lorebook.`);
+            }
+            if (bookData.entries[newUid]) {
+                // @ts-ignore
+                return toastr.warning(`UID ${newUid} already exists! Choose an unused number.`);
+            }
 
             bookData.entries[newUid] = bookData.entries[oldUid];
             bookData.entries[newUid].uid = Number(newUid);
@@ -270,7 +319,8 @@ function injectInlineButton(entryDiv) {
 
         } catch (err) {
             console.error(err);
-            alert('Failed to update UID. Check console for details.');
+            // @ts-ignore
+            toastr.error('Failed to update UID. Check console for details.');
         }
     });
 
