@@ -82,7 +82,7 @@ export function injectMoveToFolderButton() {
         html += `<select onchange="window.tempFolderMoveTarget = this.value" class="text_pole" style="width: 100%; padding: 6px;">`;
         ['Uncategorized', ...folderNames].forEach(/** @param {string} folder */ folder => {
             const selected = folder === currentFolder ? ' selected' : '';
-            const safeFolder = folder.replace(/"/g, '"');
+            const safeFolder = folder.replace(/"/g, '&quot;');
             html += `<option value="${safeFolder}"${selected}>${folder}</option>`;
         });
         html += `</select></div>`;
@@ -242,6 +242,8 @@ export function renderFolders() {
     const createFolder = (folderName, books) => {
         const details = document.createElement('details');
         details.className = 'world-info-folder';
+        // Stable DOM id so child folders can locate their parent for nesting
+        details.id = `world-folder-${folderName.replace(/[^a-zA-Z0-9-_]/g, '_')}`;
 
         if (settings.folderState[folderName]) details.open = true;
         details.addEventListener('toggle', () => {
@@ -251,20 +253,119 @@ export function renderFolders() {
 
         const summary = document.createElement('summary');
 
+        // Subfolders display only their base name - the full path lives in the data
+        const displayName = folderName.includes('/') ? folderName.split('/').pop() : folderName;
+
         let deleteBtnHtml = folderName !== "Uncategorized"
             ? `<i class="fa-solid fa-trash" style="float: right; color: var(--red); opacity: 0.7;" title="Delete Folder"></i>`
             : '';
 
-        summary.innerHTML = `<i class="fa-solid fa-folder"></i> <span class="folder-name">${folderName}</span> ${deleteBtnHtml}`;
+        summary.innerHTML = `<i class="fa-solid fa-folder"></i> <span class="folder-name">${displayName}</span> ${deleteBtnHtml}`;
         details.appendChild(summary);
 
         if (folderName !== "Uncategorized") {
+            // === NESTED FOLDER DRAG AND DROP ===
+            summary.draggable = true;
+
+            // 1. Pick up the folder
+            summary.addEventListener('dragstart', (/** @type {DragEvent} */ e) => {
+                e.stopPropagation();
+                if (e.dataTransfer) {
+                    e.dataTransfer.setData('text/plain', folderName);
+                    e.dataTransfer.effectAllowed = 'move';
+                }
+                summary.style.opacity = '0.5';
+            });
+
+            summary.addEventListener('dragend', () => {
+                summary.style.opacity = '1';
+            });
+
+            // 2. Hovering over a target folder
+            summary.addEventListener('dragover', (/** @type {DragEvent} */ e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+                summary.style.backgroundColor = 'var(--SmartThemeQuoteColor, #4caf50)';
+                summary.style.color = 'var(--black)';
+            });
+
+            summary.addEventListener('dragleave', (/** @type {DragEvent} */ e) => {
+                e.stopPropagation();
+                summary.style.backgroundColor = '';
+                summary.style.color = '';
+            });
+
+            // 3. Dropping onto a target folder
+            summary.addEventListener('drop', (/** @type {DragEvent} */ e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                summary.style.backgroundColor = '';
+                summary.style.color = '';
+
+                if (!e.dataTransfer) return;
+                const draggedFolder = e.dataTransfer.getData('text/plain');
+
+                // Prevents dropping a folder onto itself
+                if (!draggedFolder || draggedFolder === folderName) return;
+
+                // Prevents dropping a parent folder into its own descendant
+                if (folderName.startsWith(draggedFolder + '/')) {
+                    alert("Cannot drop a parent folder into its own subfolder.");
+                    return;
+                }
+
+                const draggedBaseName = draggedFolder.split('/').pop() || draggedFolder;
+                const newFolderPath = `${folderName}/${draggedBaseName}`;
+
+                if (settings.folders[newFolderPath]) {
+                    alert("A folder with that name already exists in this location!");
+                    return;
+                }
+
+                // Moves the dragged folder to its new nested path
+                settings.folders[newFolderPath] = settings.folders[draggedFolder];
+                delete settings.folders[draggedFolder];
+
+                if (settings.folderState[draggedFolder] !== undefined) {
+                    settings.folderState[newFolderPath] = settings.folderState[draggedFolder];
+                    delete settings.folderState[draggedFolder];
+                }
+
+                // Rewrites the paths of any subfolders inside the dragged folder
+                const draggedPrefix = draggedFolder + '/';
+                for (const oldKey in settings.folders) {
+                    if (oldKey.startsWith(draggedPrefix)) {
+                        const suffix = oldKey.substring(draggedPrefix.length);
+                        const newChildPath = `${newFolderPath}/${suffix}`;
+
+                        settings.folders[newChildPath] = settings.folders[oldKey];
+                        delete settings.folders[oldKey];
+
+                        if (settings.folderState[oldKey] !== undefined) {
+                            settings.folderState[newChildPath] = settings.folderState[oldKey];
+                            delete settings.folderState[oldKey];
+                        }
+                    }
+                }
+
+                saveSettingsDebounced();
+                renderFolders();
+            });
+
             const trashIcon = summary.querySelector('.fa-trash');
             if (trashIcon) {
                 trashIcon.addEventListener('click', (e) => {
                     e.preventDefault();
-                    if (confirm(`Delete folder '${folderName}'? (Its lorebooks will be moved back to Uncategorized)`)) {
+                    if (confirm(`Delete folder '${displayName}' and any subfolders? (Their lorebooks will be moved back to Uncategorized)`)) {
+                        // Deletes this folder AND cascades to its subfolders
                         delete settings.folders[folderName];
+                        for (const key in settings.folders) {
+                            if (key.startsWith(folderName + '/')) {
+                                delete settings.folders[key];
+                                delete settings.folderState[key];
+                            }
+                        }
                         saveSettingsDebounced();
                         renderFolders();
                     }
@@ -367,19 +468,21 @@ export function renderFolders() {
                 select.style.padding = '2px';
                 select.style.marginLeft = 'auto';
 
-                const defaultOpt = document.createElement('option');
-                defaultOpt.innerText = "Move to...";
-                defaultOpt.value = "";
-                defaultOpt.disabled = true;
-                defaultOpt.selected = true;
-                select.appendChild(defaultOpt);
+                // Explicit cancel entry at the top of the list
+                const cancelOpt = document.createElement('option');
+                cancelOpt.value = '';
+                cancelOpt.innerText = '✕ Cancel';
+                cancelOpt.style.opacity = '0.6';
+                select.appendChild(cancelOpt);
 
-                const allOptions = ["Uncategorized", ...folderNames];
+                // Lists every folder INCLUDING the current one, pre-selected
+                // mirroring the toolbar "Move this lorebook into a folder" button
+                const allOptions = ['Uncategorized', ...folderNames];
                 allOptions.forEach(/** @param {string} opt */ opt => {
-                    if (opt === folderName) return;
                     const option = document.createElement('option');
                     option.value = opt;
                     option.innerText = opt;
+                    if (opt === folderName) option.selected = true;
                     select.appendChild(option);
                 });
 
@@ -388,16 +491,22 @@ export function renderFolders() {
 
                 select.addEventListener('change', () => {
                     const targetFolder = select.value;
-                    if (targetFolder) {
-                        for (const f in settings.folders) {
-                            settings.folders[f] = settings.folders[f].filter(/** @param {string} b */ b => b !== bookObj.text);
-                        }
-                        if (targetFolder !== "Uncategorized") {
-                            settings.folders[targetFolder].push(bookObj.text);
-                        }
-                        saveSettingsDebounced();
-                        renderFolders();
+
+                    if (!targetFolder) {
+                        // "✕ Cancel" chosen - bail out without moving anything
+                        select.remove();
+                        moveBtn.style.display = 'block';
+                        return;
                     }
+
+                    for (const f in settings.folders) {
+                        settings.folders[f] = settings.folders[f].filter(/** @param {string} b */ b => b !== bookObj.text);
+                    }
+                    if (targetFolder !== 'Uncategorized') {
+                        settings.folders[targetFolder].push(bookObj.text);
+                    }
+                    saveSettingsDebounced();
+                    renderFolders();
                 });
 
                 select.addEventListener('blur', () => {
@@ -431,8 +540,35 @@ export function renderFolders() {
         // Sorts the lorebooks inside this folder alphabetically
         booksInThisFolder.sort((/** @type {{value: string, text: string}} */ a, /** @type {{value: string, text: string}} */ b) => a.text.localeCompare(b.text, undefined, { sensitivity: 'base', numeric: true }));
 
+        const folderElement = createFolder(folderName, booksInThisFolder);
+
+        // Subfolders (paths containing '/') nest inside their parent folder
+        if (folderName.includes('/')) {
+            const parentPath = folderName.split('/').slice(0, -1).join('/');
+            const parentElement = customContainer.querySelector(`#world-folder-${parentPath.replace(/[^a-zA-Z0-9-_]/g, '_')}`);
+
+            if (parentElement) {
+                // Direct children only, so we never grab a deeper subfolder's contents
+                const parentContents = Array.from(parentElement.children).find(child => child.classList.contains('folder-contents'));
+
+                if (parentContents) {
+                    // Inserting before the first lorebook stacks all subfolders at the top,
+                    // in alphabetical order (the sort above guarantees parents render first)
+                    const firstBookItem = Array.from(parentContents.children).find(child => child.classList.contains('folder-item'));
+
+                    if (firstBookItem) {
+                        parentContents.insertBefore(folderElement, firstBookItem);
+                    } else {
+                        parentContents.appendChild(folderElement);
+                    }
+                    continue;
+                }
+            }
+            // Parent missing - falls back to rendering at root level
+        }
+
         // @ts-ignore
-        customContainer.appendChild(createFolder(folderName, booksInThisFolder));
+        customContainer.appendChild(folderElement);
     }
 
     const uncategorizedBooks = availableBooks.filter(b => !assignedLorebooks.has(b.text));

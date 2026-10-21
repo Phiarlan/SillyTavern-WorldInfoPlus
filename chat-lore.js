@@ -366,28 +366,37 @@ async function openMultiChatLoreMenu() {
             window.tempChatLoreSelection = window.tempChatLoreSelection.filter(b => b !== bookName);
         }
 
-        // Live-updates the folder count badge (e.g. "(2/5)")
+        // Live-updates this folder's badge AND every ancestor's, since subtree
+        // counts ripple upward when a nested checkbox changes
         if (el && el instanceof HTMLElement) {
-            const folderDetails = el.closest('details');
-            if (folderDetails) {
-                const badge = folderDetails.querySelector('.wip-folder-count');
-                const boxes = folderDetails.querySelectorAll('input[type="checkbox"]');
+            let folderDetails = /** @type {HTMLElement | null} */ (el.closest('details.wip-chat-lore-folder'));
+
+            while (folderDetails) {
+                // :scope > summary grabs THIS folder's own badge, never a subfolder's
+                const badge = folderDetails.querySelector(':scope > summary .wip-folder-count');
+
+                // Subtree = ALL checkboxes inside this details, subfolders' included
+                const boxes = Array.from(folderDetails.querySelectorAll('input[type="checkbox"]'));
+
                 if (badge && boxes.length > 0) {
-                    const checkedCount = Array.from(boxes).filter(/** @param {Element} cb */ cb => /** @type {HTMLInputElement} */ (cb).checked).length;
+                    const checkedCount = boxes.filter(/** @param {Element} cb */ cb => /** @type {HTMLInputElement} */ (cb).checked).length;
                     badge.textContent = ` (${checkedCount}/${boxes.length})`;
                 }
+
+                // Steps to the next enclosing folder in the nested chain
+                const parentEl = folderDetails.parentElement;
+                folderDetails = parentEl ? /** @type {HTMLElement | null} */ (parentEl.closest('details.wip-chat-lore-folder')) : null;
             }
         }
     };
 
 
-    // Builds the folder-grouped checklist UI (mirrors the Tag Folders panel)
+    // Builds the folder-grouped checklist UI (mirrors the Tag Folders panel and nested!)
     const sortBooks = (/** @type {string[]} */ arr) =>
         arr.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }));
 
-    const sortedFolderNames = Object.keys(settings.folders).sort((a, b) =>
-        a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true })
-    );
+    const sortNames = (/** @type {string[]} */ arr) =>
+        arr.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }));
 
     /** @type {Set<string>} */
     const assignedLorebooks = new Set();
@@ -408,28 +417,90 @@ async function openMultiChatLoreMenu() {
         `;
     };
 
+    // --- FOLDER TREE: flat "Parent/Child" keys become nested nodes ---
+    /** @type {any} */
+    const rootNode = { name: '', children: {}, books: [] };
+
     /**
-     * @param {string} folderName
-     * @param {string[]} books
+     * @param {string} keyPath
+     * @returns {any}
+     */
+    const getNode = (keyPath) => {
+        /** @type {any} */
+        let node = rootNode;
+        for (const segment of keyPath.split('/')) {
+            if (!node.children[segment]) {
+                node.children[segment] = { name: segment, children: {}, books: [] };
+            }
+            node = node.children[segment];
+        }
+        return node;
+    };
+
+    // Populates every folder node with its existing, sorted lorebooks
+    Object.keys(settings.folders).forEach(/** @param {string} keyPath */ keyPath => {
+        const node = getNode(keyPath);
+
+        /** @type {string[]} */
+        const booksInFolder = (settings.folders[keyPath] || [])
+            .map(/** @param {string} name */ name => availableBooks.find(b => b === name))
+            .filter(/** @param {any} b */ b => b !== undefined);
+
+        sortBooks(booksInFolder);
+        booksInFolder.forEach(/** @param {string} b */ b => { node.books.push(b); assignedLorebooks.add(b); });
+    });
+
+    /**
+     * Counts linked books in this node's ENTIRE subtree (self + descendants).
+     * Used only for auto-open - badges stay direct-only.
+     * @param {any} node
+     * @returns {number}
+     */
+    const subtreeCheckedCount = (node) => {
+        let count = node.books.filter(/** @param {string} b */ b => linkedBooks.includes(b)).length;
+        Object.values(node.children).forEach(/** @param {any} child */ child => { count += subtreeCheckedCount(child); });
+        return count;
+    };
+
+    /**
+     * Counts ALL books (linked or not) in this node's entire subtree.
+     * @param {any} node
+     * @returns {number}
+     */
+    const subtreeBookCount = (node) => {
+        let count = node.books.length;
+        Object.values(node.children).forEach(/** @param {any} child */ child => { count += subtreeBookCount(child); });
+        return count;
+    };
+
+    /**
+     * @param {any} node
      * @returns {string}
      */
-    const buildFolderSection = (folderName, books) => {
-        const checkedCount = books.filter(/** @param {string} b */ b => linkedBooks.includes(b)).length;
+    const renderNode = (node) => {
+        // Subtree-aware badges: count everything inside, subfolders included
+        const checkedCount = subtreeCheckedCount(node);
+        const totalCount = subtreeBookCount(node);
         const isOpen = checkedCount > 0 ? ' open' : '';
-        const countBadge = books.length > 0
-            ? `<span class="wip-folder-count" style="opacity: 0.6; font-size: 0.85em;"> (${checkedCount}/${books.length})</span>`
+        const countBadge = totalCount > 0
+            ? `<span class="wip-folder-count" style="opacity: 0.6; font-size: 0.85em;"> (${checkedCount}/${totalCount})</span>`
             : '';
 
-        let section = `<details style="margin-bottom: 8px; border: 1px solid var(--SmartThemeBorderColor, #555); border-radius: 5px; padding: 5px;"${isOpen}>`;
+        let section = `<details class="wip-chat-lore-folder" style="margin-bottom: 8px; border: 1px solid var(--SmartThemeBorderColor, #555); border-radius: 5px; padding: 5px;"${isOpen}>`;
         section += `<summary style="cursor: pointer; font-weight: bold; display: flex; align-items: center; gap: 8px; padding: 3px;">`;
-        section += `<i class="fa-solid fa-folder"></i> <span>${folderName}</span>${countBadge}`;
+        section += `<i class="fa-solid fa-folder"></i> <span>${node.name}</span>${countBadge}`;
         section += `</summary>`;
         section += `<div style="margin-top: 5px; padding-left: 10px;">`;
 
-        if (books.length === 0) {
+        // Subfolders stack on top (alphabetical), matching the main panel
+        sortNames(Object.keys(node.children)).forEach(/** @param {string} childName */ childName => {
+            section += renderNode(node.children[childName]);
+        });
+
+        if (node.books.length === 0 && Object.keys(node.children).length === 0) {
             section += `<div style="opacity: 0.5; font-style: italic; padding-left: 5px;">Empty folder...</div>`;
         } else {
-            books.forEach(/** @param {string} b */ b => { section += buildBookCheckbox(b); });
+            node.books.forEach(/** @param {string} b */ b => { section += buildBookCheckbox(b); });
         }
 
         section += `</div></details>`;
@@ -439,22 +510,16 @@ async function openMultiChatLoreMenu() {
     let html = `<div style="max-height: 400px; overflow-y: auto; text-align: left; padding: 10px;">`;
     html += `<div style="margin-bottom: 15px; font-size: 0.9em; opacity: 0.8;">Select multiple lorebooks to automatically load when this specific chat is opened. Folders mirror your Tag Folders.</div>`;
 
-    // Named folders (alphabetical), skipping books that no longer exist
-    sortedFolderNames.forEach(/** @param {string} folderName */ folderName => {
-        const booksInFolder = (settings.folders[folderName] || [])
-            .map(/** @param {string} name */ name => availableBooks.find(b => b === name))
-            .filter(/** @param {any} b */ b => b !== undefined);
-
-        sortBooks(booksInFolder);
-        booksInFolder.forEach(/** @param {string} b */ b => assignedLorebooks.add(b));
-
-        html += buildFolderSection(folderName, booksInFolder);
+    // Root folders (alphabetical)
+    sortNames(Object.keys(rootNode.children)).forEach(/** @param {string} folderName */ folderName => {
+        html += renderNode(rootNode.children[folderName]);
     });
 
     // Uncategorized last, mirroring the panel
     const uncategorizedBooks = availableBooks.filter(/** @param {string} b */ b => !assignedLorebooks.has(b));
     sortBooks(uncategorizedBooks);
-    html += buildFolderSection('Uncategorized', uncategorizedBooks);
+
+    html += renderNode({ name: 'Uncategorized', children: {}, books: uncategorizedBooks });
 
     html += `</div>`;
 

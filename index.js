@@ -46,11 +46,21 @@ eventSource.on(event_types.APP_READY, () => {
 
     createFolderBtn.addEventListener("click", () => {
         const newFolder = prompt("Enter name for new folder:");
-        if (newFolder && !settings.folders[newFolder]) {
+        if (!newFolder) return;
+
+        // Validates nested paths: "Parent/Child" requires "Parent" to exist
+        if (newFolder.includes('/')) {
+            const parentPath = newFolder.split('/').slice(0, -1).join('/');
+            if (!settings.folders[parentPath]) {
+                return alert(`Parent folder "${parentPath}" doesn't exist yet! Create it first, or create "${newFolder.split('/').pop()}" and drag it in.`);
+            }
+        }
+
+        if (!settings.folders[newFolder]) {
             settings.folders[newFolder] = [];
             saveSettingsDebounced();
             renderFolders();
-        } else if (newFolder) {
+        } else {
             alert("Folder already exists!");
         }
     });
