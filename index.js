@@ -162,30 +162,37 @@ document.addEventListener('change', (e) => {
         const globalSelect = $('#world_info');
         const rawVal = globalSelect.val();
         /** @type {string[]} */
-        let currentActive = normalizeWorldInfoValueList(rawVal);
+        const previousActive = normalizeWorldInfoValueList(rawVal);
 
         // 2. Remove ONLY the books that are managed by profiles (clearing previous profile state)
-        currentActive = currentActive.filter(/** @param {string} id */ id => !allManagedBooks.has(id));
+        const currentActive = previousActive.filter(/** @param {string} id */ id => !allManagedBooks.has(id));
+        const removedCount = previousActive.length - currentActive.length;
 
-        // 3. Add the books specifically mapped to THIS new profile
+        // 3. Add the books mapped to THIS profile, counting only true additions
+        let addedCount = 0;
         linkedBooks.forEach(/** @param {string} id */ id => {
-            if (!currentActive.includes(id)) currentActive.push(id);
+            if (!currentActive.includes(id)) {
+                currentActive.push(id);
+                addedCount++;
+            }
         });
 
+        updateProfileInfoDisplay();
+
+        if (removedCount === 0 && addedCount === 0) return;
+
         // @ts-ignore - Update ST's backend dropdown
-        currentActive = normalizeWorldInfoValueList(currentActive);
-        globalSelect.val(currentActive).trigger('change');
+        globalSelect.val(normalizeWorldInfoValueList(currentActive)).trigger('change');
         scheduleHideChatLoreFromGlobalUI();
 
         debouncedRenderFolders();
-        updateProfileInfoDisplay();
 
-        if (linkedBooks.length > 0) {
+        if (addedCount > 0) {
             // @ts-ignore
-            toastr.info(`Loaded ${linkedBooks.length} lorebook(s) mapped to Connection Profile: "${profileName}"`, 'Lorebooks Synced');
+            toastr.info(`Loaded ${addedCount} lorebook(s) mapped to Connection Profile: "${profileName}"`, 'Lorebooks Synced');
         } else {
             // @ts-ignore
-            toastr.info(`Cleared profile-managed lorebooks for Connection Profile: "${profileName}"`, 'Lorebooks Cleared');
+            toastr.info(`Cleared ${removedCount} profile-managed lorebook(s) for Connection Profile: "${profileName}"`, 'Lorebooks Cleared');
         }
     }
 });
